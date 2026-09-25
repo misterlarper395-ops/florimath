@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Velara Proxy</title>
+    <!-- Inter Font & Lucide Icons for Velara Aesthetic -->
+    <link href="https://googleapis.com" rel="stylesheet">
+    <script src="https://unpkg.com"></script>
+    <!-- Scramjet Controller via jsDelivr CDN -->
+    <script src="https://jsdelivr.net"></script>
+    
+    <style>
+        :root {
+            --bg-glow: radial-gradient(circle at 50% 50%, #1e1145 0%, #080711 100%);
+            --glass-bg: rgba(13, 12, 28, 0.65);
+            --glass-border: rgba(255, 255, 255, 0.07);
+            --accent-glow: 0 0 25px rgba(123, 97, 255, 0.4);
+            --accent: #7b61ff;
+            --accent-hover: #9681ff;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
+        body, html { width: 100%; height: 100%; background: #080711; background: var(--bg-glow); color: #fff; overflow: hidden; }
+
+        /* Background grid aesthetic typical of Velara */
+        .grid-overlay {
+            position: absolute; width: 100%; height: 100%; z-index: 1;
+            background-image: linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+            background-size: 40px 40px; pointer-events: none;
+        }
+
+        /* Centered Search UI Container */
+        .velara-panel {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 10; width: 90%; max-width: 650px; text-align: center;
+            padding: 40px 30px; border-radius: 24px;
+            background: var(--glass-bg); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border); box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+            transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        h1 { font-size: 2.5rem; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.05em; background: linear-gradient(135deg, #fff 30%, #a594ff 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        p.subtitle { color: #8e8ca7; font-size: 0.95rem; margin-bottom: 30px; }
+
+        /* Search Bar Wrapper */
+        .search-box {
+            display: flex; align-items: center; width: 100%; padding: 6px;
+            background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 14px; transition: all 0.3s ease;
+        }
+        .search-box:focus-within {
+            border-color: var(--accent); box-shadow: var(--accent-glow); background: rgba(255, 255, 255, 0.06);
+        }
+        .search-box i { color: #64627a; margin-left: 14px; margin-right: 10px; }
+        .search-box input {
+            flex: 1; background: transparent; border: none; outline: none;
+            color: #fff; font-size: 1rem; padding: 12px 6px;
+        }
+        .search-box button {
+            background: var(--accent); color: white; border: none; outline: none;
+            padding: 12px 24px; border-radius: 10px; font-weight: 600; cursor: pointer;
+            transition: background 0.2s ease; display: flex; align-items: center; gap: 8px;
+        }
+        .search-box button:hover { background: var(--accent-hover); }
+
+        /* Status Loader Screen */
+        .status-msg { display: none; margin-top: 20px; font-size: 0.9rem; color: #a594ff; gap: 8px; justify-content: center; align-items: center; }
+        .spinner { border: 2px solid rgba(255,255,255,0.1); border-top: 2px solid var(--accent); border-radius: 50%; width: 16px; height: 16px; animation: spin 0.8s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Full Screen Iframe Setup */
+        iframe { width: 100%; height: 100%; border: none; background: #fff; display: none; position: absolute; top: 0; left: 0; z-index: 2; }
+
+        /* Transforming Navigation Bar (Once page loads) */
+        .velara-panel.minimized {
+            top: 20px; transform: translate(-50%, 0); max-width: 800px;
+            padding: 10px 20px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+        .velara-panel.minimized h1, 
+        .velara-panel.minimized p.subtitle { display: none; }
+        .velara-panel.minimized .search-box { padding: 4px; border-radius: 10px; }
+        .velara-panel.minimized .search-box input { padding: 6px; font-size: 0.9rem; }
+        .velara-panel.minimized .search-box button { padding: 8px 16px; font-size: 0.9rem; border-radius: 6px; }
+    </style>
+</head>
+<body>
+
+    <div class="grid-overlay"></div>
+
+    <!-- Interface Panel -->
+    <div id="panel" class="velara-panel">
+        <h1>velara</h1>
+        <p class="subtitle">Next-gen static CDN proxy engine</p>
+        
+        <div class="search-box">
+            <i data-lucide="globe"></i>
+            <input type="text" id="url-input" placeholder="Search DuckDuckGo or type a URL...">
+            <button onclick="launchUrl()">
+                Explore <i data-lucide="arrow-right" style="width:16px;height:16px;margin:0;"></i>
+            </button>
+        </div>
+
+        <div id="status" class="status-msg">
+            <div class="spinner"></div>
+            <span id="status-text">Registering proxy worker...</span>
+        </div>
+    </div>
+
+    <!-- Active Frame View -->
+    <iframe id="view"></iframe>
+
+    <script>
+        const proxyPrefix = '/service/';
+        const controller = new ScramjetController({
+            prefix: proxyPrefix,
+            files: { worker: './sw.js' }
+        });
+
+        const panel = document.getElementById('panel');
+        const statusEl = document.getElementById('status');
+        const statusText = document.getElementById('status-text');
+        const viewEl = document.getElementById('view');
+        const inputEl = document.getElementById('url-input');
+
+        // Initialize design icons
+        lucide.createIcons();
+
+        async function initProxy() {
+            try {
+                await controller.register();
+                console.log("Interceptor bound.");
+                
+                // Allow direct loading using hash routes (e.g. ://yoursite.com)
+                const hash = window.location.hash.substring(1).trim();
+                if (hash) {
+                    inputEl.value = hash;
+                    launchUrl();
+                }
+            } catch (err) {
+                statusEl.style.display = 'flex';
+                statusText.innerText = "Interception Error: " + err.message;
+            }
+        }
+
+        function launchUrl() {
+            const input = inputEl.value.trim();
+            if (!input) return;
+
+            statusEl.style.display = 'flex';
+            statusText.innerText = "Routing traffic via Wisp transport...";
+
+            // Fixed: Check if query requires DuckDuckGo search or direct URL layout
+            let targetUrl = input;
+            if (!input.includes('.') || input.includes(' ')) {
+                targetUrl = `https://duckduckgo.com{encodeURIComponent(input)}`;
+            } else if (!input.startsWith('http')) {
+                targetUrl = `https://${input}`;
+            }
+
+            const proxiedUrl = controller.encodeUrl(targetUrl);
+            
+            // Transform UI into a floating navigation layout
+            panel.classList.add('minimized');
+            statusEl.style.display = 'none';
+            
+            // Render proxy window
+            viewEl.style.display = 'block';
+            viewEl.src = proxiedUrl;
+            
+            // Sync URL hash tracking
+            window.location.hash = targetUrl;
+        }
+
+        // Trigger action on Enter keypress
+        inputEl.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') launchUrl();
+        });
+
+        initProxy();
+    </script>
+</body>
+</html>
